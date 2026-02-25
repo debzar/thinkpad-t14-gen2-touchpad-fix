@@ -1,87 +1,91 @@
 #!/bin/bash
 
 # =================================================================
-# ThinkPad T14 Gen 2 Touchpad & Input Manager (CachyOS/GNOME Ready)
-# ⚠️ TESTING STATE / ESTADO DE PRUEBA
+# ThinkPad T14 Gen 2 Touchpad & Input Manager - ULTIMATE FIX
+# Optimized for CachyOS / GNOME / Arch
 # =================================================================
 
 if [[ $EUID -ne 0 ]]; then
-   echo "❌ This script must be run as root (use sudo)."
+   echo "❌ Este script debe ejecutarse como root (usa sudo)."
    exit 1
 fi
 
 QUIRKS_FILE="/etc/libinput/local-overrides.quirks"
 UDEV_RULE="/etc/udev/rules.d/99-touchpad-no-sleep.rules"
 MODPROBE_FILE="/etc/modprobe.d/psmouse.conf"
+RESUME_SCRIPT="/usr/local/bin/touchpad-resume-fix.sh"
+SYSTEMD_SERVICE="/etc/systemd/system/touchpad-resume.service"
 
 install_fix() {
-    echo "🚀 Starting installation of Hyper-Responsive Fix..."
+    echo "🚀 Instalando Fix de Sensibilidad Extrema y Resurrección..."
 
-    # 1. Force RMI4 Protocol (Better than PS/2)
-    echo "📡 Step 1: Forcing RMI4 protocol via modprobe..."
+    # 1. Forzar Protocolo RMI4
+    echo "📡 Paso 1: Configurando protocolo RMI4 (SMBus)..."
     echo "options psmouse synaptics_intertouch=1" > "$MODPROBE_FILE"
 
-    # 2. Hyper-Sensitive Quirks & Anti-Jitter
-    echo "🎯 Step 2: Applying Extreme Sensitivity (2:1) & Button Fix..."
+    # 2. Quirks de Sensibilidad (2:1) y Anti-Jitter
+    echo "🎯 Paso 2: Aplicando sensibilidad 2:1 y bloqueo de movimiento fantasma..."
     mkdir -p /etc/libinput
     cat <<EOF > "$QUIRKS_FILE"
 [ThinkPad T14 Gen 2 Touchpad]
 MatchUdevType=touchpad
 MatchName=Synaptics TM3471-030
-# Ultra-light pressure (Fixes hard clicks/ignored taps)
 AttrPressureRange=2:1
 AttrThumbPressureThreshold=20
 AttrPalmPressureThreshold=254
-# Instant tap response (Zero delay)
 AttrTappingPointingStickThreshold=0.0
 AttrTappingTerminatorThreshold=0.01
 
 [ThinkPad T14 Gen 2 TrackPoint Fix]
 MatchUdevType=pointingstick
-# This prevents the cursor from "going crazy" while keeping buttons active
 AttrTrackpointMultiplier=0.0
 EOF
 
-    # 3. Anti-Freeze Udev Rule (Power Management)
-    echo "⚡ Step 3: Disabling power-save for the bus to eliminate freezing..."
+    # 3. Regla Anti-Freeze
+    echo "⚡ Paso 3: Desactivando ahorro de energía en el bus (Anti-Freeze)..."
     cat <<EOF > "$UDEV_RULE"
-# Keep the touchpad bus awake at all times
 ACTION=="add", SUBSYSTEM=="serio", DRIVERS=="psmouse", ATTR{description}=="Synaptics*", ATTR{power/control}="on"
 ACTION=="add", SUBSYSTEM=="i2c", DRIVERS=="i2c_designware", ATTR{power/control}="on"
 EOF
 
-    # 4. GNOME Specific Settings (if applicable)
-    if command -v gsettings &> /dev/null; then
-        echo "🎨 Step 4: Optimizing GNOME peripheral settings..."
-        # Note: This runs for the user who called sudo if configured, otherwise apply manually
-        sudo -u $(logname) gsettings set org.gnome.desktop.peripherals.touchpad tap-to-click true
-        sudo -u $(logname) gsettings set org.gnome.desktop.peripherals.touchpad tap-and-drag true
-    fi
+    # 4. Fix de Suspensión (Resurrección automática)
+    echo "💤 Paso 4: Instalando servicio de recuperación post-suspensión..."
+    cat <<EOF > "$RESUME_SCRIPT"
+#!/bin/bash
+modprobe -r psmouse
+modprobe psmouse synaptics_intertouch=1
+udevadm control --reload-rules && udevadm trigger
+EOF
+    chmod +x "$RESUME_SCRIPT"
 
-    echo "✅ Fixes applied successfully!"
-    echo "⚠️  REBOOT is required to apply kernel and power changes."
+    cat <<EOF > "$SYSTEMD_SERVICE"
+[Unit]
+Description=Fix Touchpad sensitivity after suspend
+After=suspend.target hibernate.target hybrid-sleep.target suspend-then-hibernate.target
+
+[Service]
+Type=oneshot
+ExecStart=$RESUME_SCRIPT
+
+[Install]
+WantedBy=suspend.target hibernate.target hybrid-sleep.target suspend-then-hibernate.target
+EOF
+    systemctl enable touchpad-resume.service
+
+    echo "✅ ¡Todo instalado! Reinicia para aplicar los cambios del Kernel."
 }
 
 uninstall_fix() {
-    echo "🔄 Rolling back changes..."
-    rm -f "$QUIRKS_FILE"
-    rm -f "$UDEV_RULE"
-    rm -f "$MODPROBE_FILE"
-    echo "✅ System restored to default. Please reboot."
+    echo "🔄 Eliminando todas las modificaciones..."
+    systemctl disable touchpad-resume.service
+    rm -f "$QUIRKS_FILE" "$UDEV_RULE" "$MODPROBE_FILE" "$RESUME_SCRIPT" "$SYSTEMD_SERVICE"
+    echo "✅ Sistema restaurado. Por favor, reinicia."
 }
 
-# --- Menu ---
-echo "------------------------------------------"
-echo "ThinkPad T14 Gen 2 Input Manager"
-echo "------------------------------------------"
-echo "1) Install Hyper-Sensitive Fix (Recommended)"
-echo "2) Uninstall / Rollback"
-echo "3) Exit"
-read -p "Select an option: " choice
-
+echo "1) Instalar Fix Completo (Sensibilidad + Suspensión)"
+echo "2) Desinstalar"
+read -p "Opción: " choice
 case $choice in
     1) install_fix ;;
     2) uninstall_fix ;;
-    3) exit 0 ;;
-    *) echo "Invalid option." ;;
 esac
