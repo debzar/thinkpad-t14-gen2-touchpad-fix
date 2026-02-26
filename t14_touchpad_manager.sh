@@ -1,91 +1,57 @@
 #!/bin/bash
-
 # =================================================================
-# ThinkPad T14 Gen 2 Touchpad & Input Manager - ULTIMATE FIX
-# Optimized for CachyOS / GNOME / Arch
+# ThinkPad T14 Gen 2 Touchpad Fix - REVISADO Y SEGURO
 # =================================================================
 
 if [[ $EUID -ne 0 ]]; then
-   echo "❌ Este script debe ejecutarse como root (usa sudo)."
+   echo "❌ Ejecuta con sudo."
    exit 1
 fi
 
-QUIRKS_FILE="/etc/libinput/local-overrides.quirks"
-UDEV_RULE="/etc/udev/rules.d/99-touchpad-no-sleep.rules"
-MODPROBE_FILE="/etc/modprobe.d/psmouse.conf"
-RESUME_SCRIPT="/usr/local/bin/touchpad-resume-fix.sh"
-SYSTEMD_SERVICE="/etc/systemd/system/touchpad-resume.service"
+echo "🚀 Iniciando configuración quirúrgica..."
 
-install_fix() {
-    echo "🚀 Instalando Fix de Sensibilidad Extrema y Resurrección..."
+# 1. PARAMETROS DEL KERNEL (La base de la velocidad)
+MODS="psmouse.synaptics_intertouch=1 i2c_designware.disable_ps=1"
 
-    # 1. Forzar Protocolo RMI4
-    echo "📡 Paso 1: Configurando protocolo RMI4 (SMBus)..."
-    echo "options psmouse synaptics_intertouch=1" > "$MODPROBE_FILE"
+# 2. CONFIGURACIÓN DE MODPROBE
+echo "options psmouse synaptics_intertouch=1 elantech_smbus=1" > /etc/modprobe.d/psmouse.conf
 
-    # 2. Quirks de Sensibilidad (2:1) y Anti-Jitter
-    echo "🎯 Paso 2: Aplicando sensibilidad 2:1 y bloqueo de movimiento fantasma..."
-    mkdir -p /etc/libinput
-    cat <<EOF > "$QUIRKS_FILE"
+# 3. QUIRKS DE SENSIBILIDAD (Toque de pluma)
+cat <<EOF > /etc/libinput/local-overrides.quirks
 [ThinkPad T14 Gen 2 Touchpad]
 MatchUdevType=touchpad
 MatchName=Synaptics TM3471-030
-AttrPressureRange=2:1
-AttrThumbPressureThreshold=20
+AttrPressureRange=1:0
+AttrThumbPressureThreshold=10
 AttrPalmPressureThreshold=254
-AttrTappingPointingStickThreshold=0.0
-AttrTappingTerminatorThreshold=0.01
 
 [ThinkPad T14 Gen 2 TrackPoint Fix]
 MatchUdevType=pointingstick
-AttrTrackpointMultiplier=0.0
+AttrTrackpointMultiplier=0.01
 EOF
 
-    # 3. Regla Anti-Freeze
-    echo "⚡ Paso 3: Desactivando ahorro de energía en el bus (Anti-Freeze)..."
-    cat <<EOF > "$UDEV_RULE"
-ACTION=="add", SUBSYSTEM=="serio", DRIVERS=="psmouse", ATTR{description}=="Synaptics*", ATTR{power/control}="on"
-ACTION=="add", SUBSYSTEM=="i2c", DRIVERS=="i2c_designware", ATTR{power/control}="on"
-EOF
+# 4. ACTUALIZACIÓN INTELIGENTE DEL GRUB
+# Este bloque extrae la línea, limpia los parámetros si ya existen y los añade de nuevo.
+echo "🖥️  Actualizando GRUB de forma segura..."
 
-    # 4. Fix de Suspensión (Resurrección automática)
-    echo "💤 Paso 4: Instalando servicio de recuperación post-suspensión..."
-    cat <<EOF > "$RESUME_SCRIPT"
-#!/bin/bash
-modprobe -r psmouse
-modprobe psmouse synaptics_intertouch=1
-udevadm control --reload-rules && udevadm trigger
-EOF
-    chmod +x "$RESUME_SCRIPT"
+# Obtener la línea actual
+CURRENT_LINE=$(grep "GRUB_CMDLINE_LINUX_DEFAULT" /etc/default/grub)
 
-    cat <<EOF > "$SYSTEMD_SERVICE"
-[Unit]
-Description=Fix Touchpad sensitivity after suspend
-After=suspend.target hibernate.target hybrid-sleep.target suspend-then-hibernate.target
+# Limpiar parámetros previos para evitar duplicados
+CLEAN_LINE=$(echo "$CURRENT_LINE" | sed -e 's/psmouse.synaptics_intertouch=1 //g' \
+                                     -e 's/i2c_designware.disable_ps=1 //g' \
+                                     -e 's/psmouse.resetafter=1 //g')
 
-[Service]
-Type=oneshot
-ExecStart=$RESUME_SCRIPT
+# Insertar los nuevos parámetros justo después de la primera comilla
+FINAL_LINE=$(echo "$CLEAN_LINE" | sed 's/="/="'"$MODS"' /')
 
-[Install]
-WantedBy=suspend.target hibernate.target hybrid-sleep.target suspend-then-hibernate.target
-EOF
-    systemctl enable touchpad-resume.service
+# Aplicar el cambio al archivo
+sed -i "s|^GRUB_CMDLINE_LINUX_DEFAULT.*|$FINAL_LINE|" /etc/default/grub
 
-    echo "✅ ¡Todo instalado! Reinicia para aplicar los cambios del Kernel."
-}
+# 5. REGENERAR TODO
+echo "🔄 Regenerando imágenes de arranque y GRUB..."
+grub-mkconfig -o /boot/grub/grub.cfg
+mkinitcpio -P
 
-uninstall_fix() {
-    echo "🔄 Eliminando todas las modificaciones..."
-    systemctl disable touchpad-resume.service
-    rm -f "$QUIRKS_FILE" "$UDEV_RULE" "$MODPROBE_FILE" "$RESUME_SCRIPT" "$SYSTEMD_SERVICE"
-    echo "✅ Sistema restaurado. Por favor, reinicia."
-}
-
-echo "1) Instalar Fix Completo (Sensibilidad + Suspensión)"
-echo "2) Desinstalar"
-read -p "Opción: " choice
-case $choice in
-    1) install_fix ;;
-    2) uninstall_fix ;;
-esac
+echo "✅ ¡HECHO! El script ha configurado el modo RMI4 y la sensibilidad máxima."
+echo "⚠️  REINICIA para aplicar los cambios."
